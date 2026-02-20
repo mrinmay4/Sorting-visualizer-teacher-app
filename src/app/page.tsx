@@ -1,103 +1,299 @@
-import Image from "next/image";
+// app/page.tsx
+"use client";
 
-export default function Home() {
+import React, { useEffect, useRef, useState } from "react";
+import Controls from "@/components/Controls";
+import Bars from "@/components/Bars";
+import { parseInput, randomArray, sleep } from "@/lib/helpers";
+import { Step } from "@/algorithms/types";
+
+import { bubbleSort } from "@/algorithms/bubbleSort";
+import { insertionSort } from "@/algorithms/insertionSort";
+import { selectionSort } from "@/algorithms/selectionSort";
+import { mergeSort } from "@/algorithms/mergeSort";
+import { quickSort } from "@/algorithms/quickSort";
+import { heapSort } from "@/algorithms/heapSort";
+
+export default function Page() {
+  /* ================= STATE ================= */
+
+  const [input, setInput] = useState("11 28 5 9 21 12 10");
+  const [array, setArray] = useState<number[]>([]);
+  const [original, setOriginal] = useState<number[]>([]);
+  const [algorithm, setAlgorithm] = useState("Merge");
+  const [delay, setDelay] = useState(800);
+  const [running, setRunning] = useState(false);
+
+  const [highlighted, setHighlighted] = useState<number[]>([]);
+  const [pivotIndex, setPivotIndex] = useState<number | null>(null);
+  const [sortedSet, setSortedSet] = useState<Set<number>>(new Set());
+  const [activeRange, setActiveRange] = useState<[number, number] | null>(null);
+  const [currentMessage, setCurrentMessage] = useState("Ready.");
+
+  const [showIndices, setShowIndices] = useState(true);
+  const [showValues, setShowValues] = useState(true);
+
+  const stepsRef = useRef<Step[]>([]);
+  const pointerRef = useRef(0);
+  const pausedRef = useRef(false);
+  const stopRef = useRef(false);
+
+  /* ================= INIT ================= */
+
+  useEffect(() => {
+    const arr = parseInput(input);
+    const valid = arr.length ? arr : [11, 28, 5, 9, 21, 12, 10];
+    setArray(valid);
+    setOriginal(valid);
+  }, []);
+
+  /* ================= ALGORITHM MAP ================= */
+
+  const algorithmMap: Record<string, (a: number[]) => Step[]> = {
+    Bubble: bubbleSort,
+    Insertion: insertionSort,
+    Selection: selectionSort,
+    Merge: mergeSort,
+    Quick: quickSort,
+    Heap: heapSort,
+  };
+
+  /* ================= PREPARE ================= */
+
+  function prepareSteps(): boolean {
+    const arr = parseInput(input);
+    if (!arr.length) return false;
+
+    setArray([...arr]);
+    setOriginal([...arr]);
+    setHighlighted([]);
+    setPivotIndex(null);
+    setSortedSet(new Set());
+    setActiveRange(null);
+
+    const steps = algorithmMap[algorithm](arr);
+
+    stepsRef.current = steps;
+    pointerRef.current = 0;
+
+    setCurrentMessage(`Starting ${algorithm} on ${arr.length} elements.`);
+    return true;
+  }
+
+  /* ================= RESET ================= */
+
+  function resetAll() {
+    stopRef.current = true;
+    pausedRef.current = false;
+
+    setArray([...original]);
+    setHighlighted([]);
+    setPivotIndex(null);
+    setSortedSet(new Set());
+    setActiveRange(null);
+    setCurrentMessage("Reset to original array.");
+    setRunning(false);
+
+    stepsRef.current = [];
+    pointerRef.current = 0;
+  }
+
+  /* ================= PLAY ================= */
+
+  async function play() {
+    if (!stepsRef.current.length) {
+      const ok = prepareSteps();
+      if (!ok) {
+        setCurrentMessage("Enter valid numbers first.");
+        return;
+      }
+    }
+
+    setRunning(true);
+    stopRef.current = false;
+    pausedRef.current = false;
+
+    while (
+      pointerRef.current < stepsRef.current.length &&
+      !stopRef.current
+    ) {
+      const step = stepsRef.current[pointerRef.current];
+
+      /* ===== STEP HANDLER ===== */
+
+      if (step.type === "range") {
+        setActiveRange([step.left, step.right]);
+        setHighlighted([]);
+        setPivotIndex(null);
+        setCurrentMessage(step.message);
+      } else if (step.type === "compare") {
+        setHighlighted([...step.indices]);
+        setPivotIndex(null);
+        setCurrentMessage(step.message);
+      } else if (step.type === "swap") {
+        const [i, j] = step.indices;
+        setHighlighted([i, j]);
+        setPivotIndex(null);
+
+        setArray((prev) => {
+          const copy = [...prev];
+          [copy[i], copy[j]] = [copy[j], copy[i]];
+          return copy;
+        });
+
+        setCurrentMessage(step.message);
+      } else if (step.type === "overwrite") {
+        setHighlighted([step.index]);
+        setPivotIndex(null);
+
+        setArray((prev) => {
+          const copy = [...prev];
+          copy[step.index] = step.value;
+          return copy;
+        });
+
+        setCurrentMessage(step.message);
+      } else if (step.type === "pivot") {
+        setPivotIndex(step.index);
+        setHighlighted([]);
+        setCurrentMessage(step.message);
+      } else if (step.type === "markSorted") {
+        setSortedSet((prev) => new Set(prev).add(step.index));
+        setHighlighted([]);
+        setCurrentMessage(step.message);
+      }
+
+      pointerRef.current += 1;
+
+      await sleep(delay * 1.8); // slower teacher mode
+
+      /* ===== PAUSE HANDLER ===== */
+
+      while (!stopRef.current && pausedRef.current) {
+        await sleep(100);
+      }
+    }
+
+    setRunning(false);
+    setActiveRange(null);
+    setHighlighted([]);
+    setPivotIndex(null);
+
+    if (pointerRef.current >= stepsRef.current.length) {
+      setCurrentMessage("Finished sorting — teaching run complete.");
+    }
+  }
+
+  /* ================= CONTROLS ================= */
+
+  function onVisualize() {
+    prepareSteps();
+    play();
+  }
+
+  function onPauseResume() {
+    if (running) {
+      pausedRef.current = true;
+      setRunning(false);
+      setCurrentMessage("Paused.");
+    } else {
+      pausedRef.current = false;
+      setRunning(true);
+      play();
+    }
+  }
+
+  function onRandomize() {
+    const r = randomArray(7, 30);
+    setInput(r.join(" "));
+    setArray(r);
+    setOriginal(r);
+
+    setHighlighted([]);
+    setPivotIndex(null);
+    setSortedSet(new Set());
+    setActiveRange(null);
+
+    stepsRef.current = [];
+    pointerRef.current = 0;
+
+    setCurrentMessage("Randomized array.");
+  }
+
+  /* ================= INFO ================= */
+
+  const info: Record<string, { time: string; space: string }> = {
+    Bubble: { time: "O(n²)", space: "O(1)" },
+    Insertion: { time: "O(n²)", space: "O(1)" },
+    Selection: { time: "O(n²)", space: "O(1)" },
+    Merge: { time: "O(n log n)", space: "O(n)" },
+    Quick: { time: "O(n log n) average", space: "O(log n)" },
+    Heap: { time: "O(n log n)", space: "O(1)" },
+  };
+
+  /* ================= UI ================= */
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="min-h-screen bg-slate-900 p-10 text-white">
+      <div className="max-w-6xl mx-auto">
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+        <Controls
+          input={input}
+          setInput={setInput}
+          algorithm={algorithm}
+          setAlgorithm={setAlgorithm}
+          delay={delay}
+          setDelay={setDelay}
+          onRandomize={onRandomize}
+          onVisualize={onVisualize}
+          onPauseResume={onPauseResume}
+          running={running}
+          onReset={resetAll}
+        />
+
+        <div className="flex items-center gap-4 mt-6">
+          <label>Show Indices</label>
+          <input
+            type="checkbox"
+            checked={showIndices}
+            onChange={(e) => setShowIndices(e.target.checked)}
+          />
+          <label className="ml-4">Show Values</label>
+          <input
+            type="checkbox"
+            checked={showValues}
+            onChange={(e) => setShowValues(e.target.checked)}
+          />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        <Bars
+          array={array}
+          highlighted={highlighted}
+          pivotIndex={pivotIndex}
+          sorted={sortedSet}
+          activeRange={activeRange}
+          showIndices={showIndices}
+          showValues={showValues}
+        />
+
+        {/* Explanation Panel */}
+        <div className="mt-8 p-5 bg-slate-800 rounded-lg">
+          <h2 className="text-yellow-300 font-bold mb-2">
+            Step Explanation
+          </h2>
+          <p className="min-h-[40px]">{currentMessage}</p>
+          <div className="text-sm text-slate-400 mt-2">
+            Step {pointerRef.current} / {stepsRef.current.length}
+          </div>
+        </div>
+
+        {/* Info */}
+        <div className="mt-6 p-5 bg-slate-800 rounded-lg">
+          <h2 className="font-bold mb-2">Algorithm Info</h2>
+          <p>Time Complexity: {info[algorithm].time}</p>
+          <p>Space Complexity: {info[algorithm].space}</p>
+        </div>
+      </div>
     </div>
   );
 }
